@@ -31,12 +31,22 @@ usuarios : list[Usuario] = []
 eventos : list[Evento] = []
 
 @app.post('/registrar')
-async def registrar(): 
-    return 'holis'
+async def registrar(usuario : Usuario): 
+    for esto in usuarios:
+        if esto.usuario == usuario.usuario: 
+            raise HTTPException(
+                status_code=status.HTTP_406_NOT_ACCEPTABLE, 
+                detail='Ya existe un usuario con el mismo nombre'
+            )
+    usuarios.append(usuario)
 
 @app.post('/inciarsesion')
 async def iniciar_sesion(): 
     return 'holis :3'
+
+@app.post('/cerrarsesion')
+async def cerrar_sesion(): 
+    return 'chaito :3'
 
 @app.get('/eventos')
 async def listar_eventos(): 
@@ -105,6 +115,12 @@ async def añadir_notas(id, notas):
     return f'Un evento {id} con estas notas {notas}'
 
 @app.delete('/evento/{id}')
-async def eliminar_evento(id): 
-    return f'Sin este evento {id}'
-
+async def eliminar_evento(id : int): 
+    evento = filter(lambda x: x.ID == id, eventos)
+    if evento == None: 
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail='No se pudo encontrar un evento con tal id'
+        )
+    eventos.remove(evento)
+    return evento
