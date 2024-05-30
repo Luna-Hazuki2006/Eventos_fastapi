@@ -30,7 +30,7 @@ class Usuario(BaseModel):
     contraseña : str
     color_favorito : str
 
-class UsuarioEnBD(BaseModel): 
+class UsuarioEnBD(Usuario): 
     contraseñaHasheada : str
 
 class Token(BaseModel): 
@@ -43,8 +43,9 @@ class DataToken(BaseModel):
 
 usuarios : list[Usuario] = []
 eventos : list[Evento] = []
+basedatos : list[UsuarioEnBD] = []
 
-def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None):
+def crear_token_acceso(data: dict, expires_delta: Union[timedelta, None] = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -54,46 +55,47 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def dumb_decode_token(token):
-    return Usuario(usuario=token + "dummydecoded", color_favorito="john@example.com", full_name="John Doe")
+def dumb_decode_token(usuarioReal : Usuario, token):
+    return Usuario(usuario=token + "dummydecoded", color_favorito=usuarioReal.color_favorito, nombre_real=usuarioReal.nombre_real)
 
 def obtener_usuario(usuario: str):
     for esto in usuarios: 
         if esto.usuario == usuario: 
-            return UsuarioEnBD(**esto)
+            return UsuarioEnBD(usuario=esto.usuario, nombre_real=esto.nombre_real, color_favorito=esto.color_favorito, contraseña=esto.contraseña, contraseñaHasheada='dsd')
 
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
-    user = dumb_decode_token(token)
-    credentials_exception = HTTPException(
-            status_code= status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = DataToken(usuario=username)
-    except JWTError:
-        raise credentials_exception
-    user = obtener_usuario(usuario=token_data.username)
-    if user is None:
-        raise credentials_exception
-    return user
+# async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
+#     user = dumb_decode_token(token)
+#     credentials_exception = HTTPException(
+#             status_code= status.HTTP_401_UNAUTHORIZED,
+#             detail="Invalid authentication credentials",
+#             headers={"WWW-Authenticate": "Bearer"}
+#         )
+#     try:
+#         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+#         username: str = payload.get("sub")
+#         if username is None:
+#             raise credentials_exception
+#         token_data = DataToken(usuario=username)
+#     except JWTError:
+#         raise credentials_exception
+#     user = obtener_usuario(usuario=token_data.username)
+#     if user is None:
+#         raise credentials_exception
+#     return user
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password, contraseñaHasheada):
+    return pwd_context.verify(plain_password, contraseñaHasheada)
 
-def autheticate_user(username: str, password: str):
+def autenticar_usuario(username: str, password: str):
     user = obtener_usuario(username)
+    print(user)
     if not user:
         return False
-    hashed_password = get_password_hash(user.hashed_password)
-    if not verify_password(password, hashed_password):
+    contraseñaHasheada = get_password_hash(user.contraseñaHasheada)
+    if not verify_password(password, contraseñaHasheada):
         return False
     return user
 
@@ -110,14 +112,14 @@ async def registrar(usuario : Usuario):
 
 @app.post('/inciarsesion')
 async def iniciar_sesion(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> Token: 
-    usuario = autheticate_user(usuarios, form_data.username, form_data.password)
+    usuario = autenticar_usuario(form_data.username, form_data.password)
     if not usuario: 
         raise HTTPException(
             status_code= status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"})
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
+    access_token = crear_token_acceso(
         data={"sub": usuario.username}, expires_delta=access_token_expires
     )
     return Token(token_acceso=access_token, tipo_token= "bearer")
