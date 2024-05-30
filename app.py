@@ -54,13 +54,13 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# def dumb_decode_token(token):
-#     return Usuario(usuario=token + "dummydecoded", color_favorito="john@example.com", full_name="John Doe")
+def dumb_decode_token(token):
+    return Usuario(usuario=token + "dummydecoded", color_favorito="john@example.com", full_name="John Doe")
 
-def get_user(db, usuario: str):
-    if usuario in db:
-        user_dict = db[usuario]
-        return UsuarioEnBD(**user_dict)
+def obtener_usuario(usuario: str):
+    for esto in usuarios: 
+        if esto.usuario == usuario: 
+            return UsuarioEnBD(**esto)
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -80,7 +80,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         token_data = DataToken(usuario=username)
     except JWTError:
         raise credentials_exception
-    user = get_user(usuarios, usuario=token_data.username)
+    user = obtener_usuario(usuario=token_data.username)
     if user is None:
         raise credentials_exception
     return user
@@ -88,8 +88,8 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
-def autheticate_user(fake_db, username: str, password: str):
-    user = get_user(fake_db, username)
+def autheticate_user(username: str, password: str):
+    user = obtener_usuario(username)
     if not user:
         return False
     hashed_password = get_password_hash(user.hashed_password)
@@ -109,8 +109,18 @@ async def registrar(usuario : Usuario):
     return usuario
 
 @app.post('/inciarsesion')
-async def iniciar_sesion(): 
-    return 'holis :3'
+async def iniciar_sesion(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> Token: 
+    usuario = autheticate_user(usuarios, form_data.username, form_data.password)
+    if not usuario: 
+        raise HTTPException(
+            status_code= status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"})
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": usuario.username}, expires_delta=access_token_expires
+    )
+    return Token(token_acceso=access_token, tipo_token= "bearer")
 
 @app.post('/cerrarsesion')
 async def cerrar_sesion(): 
