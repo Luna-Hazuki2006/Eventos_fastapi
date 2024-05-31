@@ -108,6 +108,12 @@ async def registrar(usuario : Usuario):
                 detail='Ya existe un usuario con el mismo nombre'
             )
     usuarios.append(usuario)
+    basedatos.append(UsuarioEnBD(
+        usuario=usuario.usuario, 
+        nombre_real=usuario.nombre_real, 
+        contraseña=usuario.contraseña, 
+        contraseñaHasheada=get_password_hash(usuario.contraseña)
+    ))
     return usuario
 
 @app.post('/inciarsesion')
