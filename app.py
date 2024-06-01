@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, status, Depends
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
-from typing import List, Union, Annotated
+from typing import List, Union, Annotated, Optional
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -26,9 +26,9 @@ class Evento(BaseModel):
 
 class Usuario(BaseModel): 
     usuario : str
-    nombre_real : str
-    contraseña : str
-    color_favorito : str
+    nombre_real : Optional[str] = ''
+    contraseña : Optional[str] = ''
+    color_favorito : Optional[str] = ''
 
 class UsuarioEnBD(Usuario): 
     contraseñaHasheada : str
@@ -59,9 +59,9 @@ def dumb_decode_token(usuarioReal : Usuario, token):
     return Usuario(usuario=token + "dummydecoded", color_favorito=usuarioReal.color_favorito, nombre_real=usuarioReal.nombre_real)
 
 def obtener_usuario(usuario: str):
-    for esto in usuarios: 
+    for esto in basedatos: 
         if esto.usuario == usuario: 
-            return UsuarioEnBD(usuario=esto.usuario, nombre_real=esto.nombre_real, color_favorito=esto.color_favorito, contraseña=esto.contraseña, contraseñaHasheada='dsd')
+            return esto
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -91,11 +91,12 @@ def verify_password(plain_password, contraseñaHasheada):
 
 def autenticar_usuario(username: str, password: str):
     user = obtener_usuario(username)
+    print('Obtenido')
     print(user)
     if not user:
         return False
-    contraseñaHasheada = get_password_hash(user.contraseñaHasheada)
-    if not verify_password(password, contraseñaHasheada):
+    # contraseñaHasheada = get_password_hash(user.contraseñaHasheada)
+    if not verify_password(password, user.contraseñaHasheada):
         return False
     return user
 
@@ -110,10 +111,11 @@ async def registrar(usuario : Usuario):
     usuarios.append(usuario)
     basedatos.append(UsuarioEnBD(
         usuario=usuario.usuario, 
-        nombre_real=usuario.nombre_real, 
+        contraseñaHasheada=get_password_hash(usuario.contraseña), 
         contraseña=usuario.contraseña, 
-        contraseñaHasheada=get_password_hash(usuario.contraseña)
-    ))
+        color_favorito=usuario.color_favorito, 
+        nombre_real=usuario.nombre_real))
+    print(basedatos)
     return usuario
 
 @app.post('/inciarsesion')
@@ -126,20 +128,30 @@ async def iniciar_sesion(form_data: Annotated[OAuth2PasswordRequestForm, Depends
             headers={"WWW-Authenticate": "Bearer"})
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = crear_token_acceso(
-        data={"sub": usuario.username}, expires_delta=access_token_expires
+        data={"sub": usuario.usuario}, expires_delta=access_token_expires
     )
-    return Token(token_acceso=access_token, tipo_token= "bearer")
+    return Token(usuario=usuario.usuario, token_acceso=access_token, tipo_token= "bearer")
 
-@app.post('/cerrarsesion')
-async def cerrar_sesion(): 
-    return 'chaito :3'
+@app.post("/token")
+async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> Token:
+    usuario = autenticar_usuario(form_data.username, form_data.password)
+    if not usuario: 
+        raise HTTPException(
+            status_code= status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"})
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = crear_token_acceso(
+        data={"sub": usuario.usuario}, expires_delta=access_token_expires
+    )
+    return Token(usuario=usuario.usuario, token_acceso=access_token, tipo_token= "bearer")
 
 @app.get('/eventos')
-async def listar_eventos(): 
+async def listar_eventos(token: Annotated[str, Depends(oauth2_scheme)]): 
     return eventos
 
 @app.post('/evento', status_code=status.HTTP_201_CREATED)
-async def crear_evento(evento : Evento): 
+async def crear_evento(evento : Evento, token: Annotated[str, Depends(oauth2_scheme)]): 
     for esto in eventos: 
         if esto.ID == evento.ID: 
             raise HTTPException(
@@ -150,7 +162,7 @@ async def crear_evento(evento : Evento):
     return evento
 
 @app.get('/evento/{id}')
-async def buscar_evento(id : str): 
+async def buscar_evento(id : str, token: Annotated[str, Depends(oauth2_scheme)]): 
     for esto in eventos: 
         if esto.ID == id: return esto
     raise HTTPException(
@@ -159,7 +171,7 @@ async def buscar_evento(id : str):
     )
 
 @app.get('/eventos_hechos')
-async def listar_eventos_hechos(): 
+async def listar_eventos_hechos(token: Annotated[str, Depends(oauth2_scheme)]): 
     hechos = filter(lambda x: x.fue_realizado == True, eventos)
     if hechos == None: 
         raise HTTPException(
@@ -169,7 +181,7 @@ async def listar_eventos_hechos():
     else: return hechos
 
 @app.get('/eventos_no_hechos')
-async def listar_eventos_no_hechos(): 
+async def listar_eventos_no_hechos(token: Annotated[str, Depends(oauth2_scheme)]): 
     no_hechos = filter(lambda x: x.fue_realizado == False, eventos)
     if no_hechos == None: 
         raise HTTPException(
@@ -179,7 +191,7 @@ async def listar_eventos_no_hechos():
     else: return no_hechos
 
 @app.put('/evento/{id}')
-async def modificar_evento(id : str, evento : Evento): 
+async def modificar_evento(id : str, evento : Evento, token: Annotated[str, Depends(oauth2_scheme)]): 
     if id != evento.ID: 
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE, 
@@ -195,7 +207,7 @@ async def modificar_evento(id : str, evento : Evento):
     )
 
 @app.put('/evento_notas/{id}')
-async def añadir_notas(id : str, notas : str): 
+async def añadir_notas(id : str, notas : str, token: Annotated[str, Depends(oauth2_scheme)]): 
     for i in range(len(eventos)): 
         if eventos[i].ID == id: 
             eventos[i].notas.append(notas)
@@ -206,7 +218,7 @@ async def añadir_notas(id : str, notas : str):
     )
 
 @app.delete('/evento/{id}')
-async def eliminar_evento(id : str): 
+async def eliminar_evento(id : str, token: Annotated[str, Depends(oauth2_scheme)]): 
     for i in range(len(eventos)): 
         if eventos[i].ID == id: 
             evento = eventos[i]
